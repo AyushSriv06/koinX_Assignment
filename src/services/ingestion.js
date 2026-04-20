@@ -1,59 +1,10 @@
 const path = require('path');
 const Transaction = require('../models/Transaction');
 const { parseCSV } = require('../utils/csvParser');
-const { normalizeAsset, isValidType } = require('../utils/normalization');
+const { normalizeAsset } = require('../utils/normalization');
+const { validateRow, isValidTimestamp } = require('../utils/validation');
 
 const DATA_DIR = path.join(__dirname, '../../public');
-
-function validateRow(row, source) {
-  const flags = [];
-
-  if (!row.timestamp || !isValidTimestamp(row.timestamp)) {
-    flags.push({
-      field: 'timestamp',
-      issue: row.timestamp ? 'Malformed timestamp' : 'Missing timestamp',
-      originalValue: row.timestamp || ''
-    });
-  }
-
-  if (!row.type || !isValidType(row.type.toUpperCase())) {
-    flags.push({
-      field: 'type',
-      issue: row.type ? `Unknown transaction type: ${row.type}` : 'Missing transaction type',
-      originalValue: row.type || ''
-    });
-  }
-
-  if (!row.asset) {
-    flags.push({
-      field: 'asset',
-      issue: 'Missing asset',
-      originalValue: ''
-    });
-  }
-
-  const qty = parseFloat(row.quantity);
-  if (isNaN(qty)) {
-    flags.push({
-      field: 'quantity',
-      issue: 'Non-numeric quantity',
-      originalValue: row.quantity || ''
-    });
-  } else if (qty < 0) {
-    flags.push({
-      field: 'quantity',
-      issue: 'Negative quantity',
-      originalValue: row.quantity
-    });
-  }
-
-  return flags;
-}
-
-function isValidTimestamp(ts) {
-  const d = new Date(ts);
-  return !isNaN(d.getTime());
-}
 
 function buildTransaction(row, source, runId, flags) {
   const type = row.type ? row.type.toUpperCase().trim() : null;
@@ -63,7 +14,7 @@ function buildTransaction(row, source, runId, flags) {
   return {
     transactionId: row.transaction_id,
     timestamp: ts,
-    type: type,
+    type,
     asset: rawAsset,
     normalizedAsset: normalizeAsset(rawAsset),
     quantity: parseFloat(row.quantity) || null,
@@ -84,7 +35,7 @@ async function ingestFile(filename, source, runId) {
   const seenIds = new Set();
 
   for (const row of rows) {
-    const flags = validateRow(row, source);
+    const flags = validateRow(row);
 
     if (seenIds.has(row.transaction_id)) {
       flags.push({
@@ -96,7 +47,7 @@ async function ingestFile(filename, source, runId) {
     seenIds.add(row.transaction_id);
 
     const txn = buildTransaction(row, source, runId, flags);
-    if (flags.some(f => f.field === 'transaction_id' && f.issue.includes('Duplicate'))) {
+    if (flags.some(f => f.issue.includes('Duplicate'))) {
       txn.valid = false;
     }
 
