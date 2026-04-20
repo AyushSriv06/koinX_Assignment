@@ -76,4 +76,18 @@ router.get('/report/:runId/unmatched', async (req, res, next) => {
   }
 });
 
+router.get('/report/:runId/download', async (req, res, next) => {
+  try {
+    const report = await getFullReport(req.params.runId);
+    if (!report) {
+      return res.status(404).json({ error: 'Run not found' });
+    }
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="reconciliation-report-${req.params.runId}.csv"`);
+    res.send(report.csv);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
