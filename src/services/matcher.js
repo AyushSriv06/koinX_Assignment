@@ -15,38 +15,39 @@ function isWithinQtyTolerance(q1, q2, tolerancePct) {
   return (diff / base) * 100 <= tolerancePct;
 }
 
-function findDifferences(userTxn, exchTxn, tolerancePct) {
+function findDifferences(userTxn, exchTxn) {
   const diffs = {};
 
-  if (userTxn.priceUsd != null && exchTxn.priceUsd != null) {
-    if (userTxn.priceUsd !== exchTxn.priceUsd) {
-      diffs.priceUsd = {
-        user: userTxn.priceUsd,
-        exchange: exchTxn.priceUsd,
-        diff: Math.abs(userTxn.priceUsd - exchTxn.priceUsd)
-      };
-    }
+  if (userTxn.priceUsd != null && exchTxn.priceUsd != null && userTxn.priceUsd !== exchTxn.priceUsd) {
+    diffs.priceUsd = {
+      user: userTxn.priceUsd,
+      exchange: exchTxn.priceUsd,
+      diff: Math.abs(userTxn.priceUsd - exchTxn.priceUsd)
+    };
   }
 
-  if (userTxn.fee != null && exchTxn.fee != null) {
-    if (userTxn.fee !== exchTxn.fee) {
-      diffs.fee = {
-        user: userTxn.fee,
-        exchange: exchTxn.fee,
-        diff: Math.abs(userTxn.fee - exchTxn.fee)
-      };
-    }
+  if (userTxn.fee != null && exchTxn.fee != null && userTxn.fee !== exchTxn.fee) {
+    diffs.fee = {
+      user: userTxn.fee,
+      exchange: exchTxn.fee,
+      diff: Math.abs(userTxn.fee - exchTxn.fee)
+    };
   }
 
-  if (userTxn.quantity != null && exchTxn.quantity != null) {
-    if (userTxn.quantity !== exchTxn.quantity) {
-      const base = Math.max(Math.abs(userTxn.quantity), Math.abs(exchTxn.quantity));
-      const pctDiff = base > 0 ? (Math.abs(userTxn.quantity - exchTxn.quantity) / base) * 100 : 0;
-      diffs.quantity = {
-        user: userTxn.quantity,
-        exchange: exchTxn.quantity,
-        pctDiff: parseFloat(pctDiff.toFixed(6))
-      };
+  if (userTxn.quantity != null && exchTxn.quantity != null && userTxn.quantity !== exchTxn.quantity) {
+    const base = Math.max(Math.abs(userTxn.quantity), Math.abs(exchTxn.quantity));
+    const pctDiff = base > 0 ? (Math.abs(userTxn.quantity - exchTxn.quantity) / base) * 100 : 0;
+    diffs.quantity = {
+      user: userTxn.quantity,
+      exchange: exchTxn.quantity,
+      pctDiff: parseFloat(pctDiff.toFixed(6))
+    };
+  }
+
+  if (userTxn.timestamp && exchTxn.timestamp) {
+    const tsDiff = Math.abs(new Date(userTxn.timestamp) - new Date(exchTxn.timestamp));
+    if (tsDiff > 0) {
+      diffs.timestampOffsetMs = tsDiff;
     }
   }
 
@@ -73,9 +74,8 @@ async function matchTransactions(runId, config) {
 
   const results = [];
   const matchedExchangeIds = new Set();
-  const matchedUserIndices = new Set();
 
-  const validUserTxns = userTxns.filter((t, i) => {
+  const validUserTxns = userTxns.filter(t => {
     if (!t.valid) {
       results.push({
         category: 'unmatched_user',
@@ -84,7 +84,6 @@ async function matchTransactions(runId, config) {
         exchangeTransaction: null,
         differences: null
       });
-      matchedUserIndices.add(i);
       return false;
     }
     return true;
@@ -120,7 +119,7 @@ async function matchTransactions(runId, config) {
 
     if (bestMatch) {
       matchedExchangeIds.add(bestMatch._id.toString());
-      const diffs = findDifferences(utxn, bestMatch, config.quantityTolerancePct);
+      const diffs = findDifferences(utxn, bestMatch);
 
       if (diffs) {
         const diffFields = Object.keys(diffs).join(', ');
@@ -173,13 +172,14 @@ async function matchTransactions(runId, config) {
     }
   }
 
-  const summary = {
-    matched: results.filter(r => r.category === 'matched').length,
-    conflicting: results.filter(r => r.category === 'conflicting').length,
-    unmatchedUser: results.filter(r => r.category === 'unmatched_user').length,
-    unmatchedExchange: results.filter(r => r.category === 'unmatched_exchange').length,
-    flaggedRows: userTxns.filter(t => t.flags.length > 0).length + exchTxns.filter(t => t.flags.length > 0).length
-  };
+  const summary = results.reduce((acc, r) => {
+    if (r.category === 'matched') acc.matched++;
+    else if (r.category === 'conflicting') acc.conflicting++;
+    else if (r.category === 'unmatched_user') acc.unmatchedUser++;
+    else if (r.category === 'unmatched_exchange') acc.unmatchedExchange++;
+    return acc;
+  }, { matched: 0, conflicting: 0, unmatchedUser: 0, unmatchedExchange: 0 });
+  summary.flaggedRows = userTxns.filter(t => t.flags.length > 0).length + exchTxns.filter(t => t.flags.length > 0).length;
 
   return { results, summary };
 }
